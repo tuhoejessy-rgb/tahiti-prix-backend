@@ -9,10 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.json({
-    status: "ok",
-    message: "Tahiti Prix backend actif"
-  });
+  res.json({ status: "ok", message: "Tahiti Prix backend actif" });
 });
 
 app.post("/api/search-price", async (req, res) => {
@@ -31,43 +28,45 @@ app.post("/api/search-price", async (req, res) => {
     });
 
     const page = await browser.newPage();
+    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForTimeout(5000);
 
-    await page.goto(searchUrl, {
-      waitUntil: "networkidle",
-      timeout: 60000
-    });
+    const results = await page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll(
+        ".product-miniature, article, .js-product-miniature, .product"
+      ));
 
-    await page.waitForTimeout(3000);
+      return cards.map((card) => {
+        const text = card.innerText || "";
 
-    const results = await page.$$eval("article", (items) =>
-      items.slice(0, 10).map((item) => {
         const name =
-          item.querySelector(".product-title, h2, h3, a")?.innerText?.trim() || "";
-
-        const priceText =
-          item.querySelector(".price")?.innerText?.trim() ||
-          item.innerText.match(/\d+\s?XPF/)?.[0] ||
+          card.querySelector(".product-title")?.innerText?.trim() ||
+          card.querySelector("h2")?.innerText?.trim() ||
+          card.querySelector("h3")?.innerText?.trim() ||
+          card.querySelector("a")?.innerText?.trim() ||
           "";
 
-        const price =
-          priceText.replace(/[^\d]/g, "");
+        const priceText =
+          card.querySelector(".price")?.innerText?.trim() ||
+          card.querySelector("[itemprop='price']")?.getAttribute("content") ||
+          text.match(/\d[\d\s]*\s*XPF/i)?.[0] ||
+          "";
 
-        const image =
-          item.querySelector("img")?.src || "";
+        const price = priceText.replace(/[^\d]/g, "");
 
-        const url =
-          item.querySelector("a")?.href || "";
+        const image = card.querySelector("img")?.src || "";
+        const url = card.querySelector("a")?.href || "";
 
         return {
           name,
           price: price ? Number(price) : null,
-          priceText,
+          priceText: priceText.includes("XPF") ? priceText : price ? `${price} XPF` : "",
           image,
           url,
           store: "Carrefour Arue"
         };
-      })
-    );
+      }).filter((p) => p.name && p.price);
+    });
 
     await browser.close();
 
@@ -77,13 +76,11 @@ app.post("/api/search-price", async (req, res) => {
       source: searchUrl,
       store: "Carrefour Arue",
       count: results.length,
-      results: results.filter((r) => r.name && r.price)
+      results
     });
 
   } catch (error) {
-    if (browser) {
-      await browser.close();
-    }
+    if (browser) await browser.close();
 
     res.status(500).json({
       success: false,
