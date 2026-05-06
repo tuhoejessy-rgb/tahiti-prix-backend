@@ -9,11 +9,14 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/", (req, res) => {
-  res.json({ status: "ok", message: "Tahiti Prix backend actif" });
+  res.json({
+    status: "ok",
+    message: "Tahiti Prix backend actif"
+  });
 });
 
 app.post("/api/search-price", async (req, res) => {
-  const productName = req.body.productName || "beurre anchor";
+  const productName = req.body.productName || "beurre";
 
   const searchUrl =
     "https://ecourses.carrefour.pf/arue/recherche?controller=search&s=" +
@@ -24,48 +27,38 @@ app.post("/api/search-price", async (req, res) => {
   try {
     browser = await chromium.launch({
       headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"]
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox"
+      ]
     });
 
     const page = await browser.newPage();
-    await page.goto(searchUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(5000);
 
-    const results = await page.evaluate(() => {
-      const cards = Array.from(document.querySelectorAll(
-        ".product-miniature, article, .js-product-miniature, .product"
-      ));
+    await page.goto(searchUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000
+    });
 
-      return cards.map((card) => {
-        const text = card.innerText || "";
+    await page.waitForTimeout(8000);
 
-        const name =
-          card.querySelector(".product-title")?.innerText?.trim() ||
-          card.querySelector("h2")?.innerText?.trim() ||
-          card.querySelector("h3")?.innerText?.trim() ||
-          card.querySelector("a")?.innerText?.trim() ||
-          "";
+    const pageTitle = await page.title();
 
-        const priceText =
-          card.querySelector(".price")?.innerText?.trim() ||
-          card.querySelector("[itemprop='price']")?.getAttribute("content") ||
-          text.match(/\d[\d\s]*\s*XPF/i)?.[0] ||
-          "";
+    const html = await page.content();
 
-        const price = priceText.replace(/[^\d]/g, "");
+    const bodyText = await page.evaluate(() => {
+      return document.body.innerText;
+    });
 
-        const image = card.querySelector("img")?.src || "";
-        const url = card.querySelector("a")?.href || "";
+    const cardsCount = await page.evaluate(() => {
+      return document.querySelectorAll("article").length;
+    });
 
-        return {
-          name,
-          price: price ? Number(price) : null,
-          priceText: priceText.includes("XPF") ? priceText : price ? `${price} XPF` : "",
-          image,
-          url,
-          store: "Carrefour Arue"
-        };
-      }).filter((p) => p.name && p.price);
+    const productTitles = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll("a"))
+        .map(el => el.innerText.trim())
+        .filter(t => t.length > 5)
+        .slice(0, 20);
     });
 
     await browser.close();
@@ -73,18 +66,22 @@ app.post("/api/search-price", async (req, res) => {
     res.json({
       success: true,
       query: productName,
-      source: searchUrl,
-      store: "Carrefour Arue",
-      count: results.length,
-      results
+      url: searchUrl,
+      title: pageTitle,
+      cardsCount,
+      productTitles,
+      bodyPreview: bodyText.substring(0, 3000),
+      htmlPreview: html.substring(0, 3000)
     });
 
   } catch (error) {
-    if (browser) await browser.close();
+
+    if (browser) {
+      await browser.close();
+    }
 
     res.status(500).json({
       success: false,
-      message: "Erreur pendant la recherche Carrefour",
       error: error.message
     });
   }
